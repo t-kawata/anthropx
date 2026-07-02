@@ -1,0 +1,43 @@
+[package]
+name = "anthropx"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "anthropx"
+path = "src/main.rs"
+required-features = ["server"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+thiserror = "2"
+http = { version = "1", optional = true }
+tokio = { version = "1", features = ["sync"] }
+clap = { version = "4", features = ["derive"], optional = true }
+axum = { version = "0.8.9", optional = true }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "stream", "native-tls"], optional = true }
+uuid = { version = "1.23.3", features = ["v4"], optional = true }
+serde_json = "1"
+futures = { version = "0.3.32", optional = true }
+tokio-util = { version = "0.7.18", features = ["io"], optional = true }
+tokio-stream = { version = "0.1.18", optional = true }
+llm-bridge-core = { path = "crates/llm-bridge-rust-v0.5.0/crates/core", optional = true }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"], optional = true }
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.16", optional = true }
+
+[dev-dependencies]
+axum-test = "20.1.0"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }
+
+[features]
+default = ["server"]
+server = ["dep:axum", "dep:reqwest", "dep:uuid", "dep:llm-bridge-core", "tokio/full", "dep:clap", "dep:futures", "dep:http", "dep:tokio-util", "dep:tokio-stream", "dep:tracing-subscriber", "dep:metrics-exporter-prometheus"]
+
+# 実プロバイダーテスト (real_provider.rs) を有効化する feature。
+# CI ではこの feature なしで全テストが成功し、手動実行時のみ有効化する。
+# 使用例: cargo test --features integration-test
+integration-test = []

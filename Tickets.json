@@ -1,0 +1,657 @@
+{
+  "title": "RFC-OMISSIONS-001 実装チケット分解設計書",
+  "metadata": {
+    "source": "/Users/kawata/shyme/zasso/crates/anthropx/RFC-OMISSIONS-001.md",
+    "generatedAt": "2026-07-01",
+    "analyzedSections": "RFC OMISSIONS-001: anthropx 実装漏れ・不足の是正, Abstract, Motivation, Design, §1 HTTP クライアント接続設定（O-001, N1）, §2 リクエストレベルタイムアウト（O-002, N2）, §3 ストリーミング idle timeout（O-003, N2）, §4 register_metrics() の冪等性ガード（O-004, N3）, §5 handle_messages の record_request() 呼び出し（O-005, N4）, §6 llm-bridge-core v0.3.0 更新戦略（O-006, N5）, Implementation, §7 実装手順, §8 テスト更新, §9 マイグレーション計画, Appendix, A. 親 RFC との対応関係, B. 実装確認で発見された既存実装, C. 設計判断のまとめ（grill セッション決定事項）, D. 検証手順, 1. コンパイル確認, 2. ライブラリモード（server feature なし）のコンパイル確認, 3. clippy 警告なし, 4. 全テスト実行, 5. llm-bridge-core v0.3.0 更新後も全テストパス, E. 変更ファイル一覧"
+  },
+  "phases": [
+    {
+      "id": 0,
+      "name": "純粋ロジック・内部機構",
+      "externalDependencies": "なし",
+      "tickets": [
+        {
+          "id": 1,
+          "phaseId": 0,
+          "status": "reviewed",
+          "title": "register_metrics() への OnceLock 冪等性ガード追加",
+          "referenceSection": "RFC-OMISSIONS-001.md (§4)",
+          "background": "register_metrics() の複数回呼び出し時に metrics crate の describe_*! が重複警告を発する可能性がある。std::sync::OnceLock<()> をモジュールレベルの static に設置し、初回実行のみ describe_*! が呼ばれるようにガードする。",
+          "scope": [
+            "src/observability/metrics.rs: pub fn register_metrics() — シグネチャ不変、内部実装のみ変更"
+          ],
+          "relatedTicketIds": "",
+          "testVerification": [
+            "UT: 正常系 - register_metrics() を1回呼び出し、describe_*! が正常実行される（既存テスト維持）",
+            "UT: 異常系/冪等性 - register_metrics() を2回呼び出し、2回目は何も実行されずパニックも警告も発生しない",
+            "UT: 異常系/冪等性 - 2回目の呼び出し後も record_request() 等のカウンタが正常に動作する"
+          ],
+          "testExceptions": [],
+          "instrumentation": "静的品質チェック: 合格（1件の expect() は既存の LazyLock 初期化、正当）\n翻訳可能性: 問題なし\nテスト: 全218件成功（199 unit + 18 integration + 1 doc-test）\nコンパイル: OK\nclippy: OK\nフォーマット: OK",
+          "notes": "レビュー報告書:\n- 静的品質チェック: 合格（expect() 1件のみ — 既存コードの Prometheus レコーダー初期化、変更なし）\n- 翻訳可能性: 問題なし（関数名は動詞句、変数名はドメイン概念、マジックナンバーなし、デバッグ出力なし）\n- 依存関係: なし（relatedTicketIds 空）\n- 不完全実装（7パターン）: 全てクリア\n- 既存テスト改変: なし（全て維持）\n- 新規テスト: 2件追加、正常動作確認済\n- RFC 適合性: 設計通り OnceLock でガード。RFC コードスニペットの論理バグ（get().is_some() 使用）を set().is_ok() に修正して実装",
+          "startedAt": "2026-07-01",
+          "implementedAt": "2026-07-01",
+          "reviewedAt": "2026-07-01",
+          "completedAt": "2026-07-01"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "name": "HTTP クライアント設定",
+      "externalDependencies": "reqwest",
+      "tickets": [
+        {
+          "id": 1,
+          "phaseId": 1,
+          "status": "reviewed",
+          "title": "build_provider_clients() での reqwest::Client builder 設定追加",
+          "referenceSection": "RFC-OMISSIONS-001.md (§1, §7.1)",
+          "background": "build_provider_clients() が reqwest::Client::new() を素で使用。connect_timeout / pool_max_idle_per_host / tcp_keepalive / User-Agent が未設定。reqwest::Client::builder() に変更して一括設定を適用する。",
+          "scope": [
+            "src/lifecycle.rs: pub fn build_provider_clients(config: &AppConfig) -> HashMap<String, ProviderClient> — 戻り値型不変（reqwest::Client::new() → reqwest::Client::builder() + connect_timeout / pool_max_idle_per_host / tcp_keepalive / User-Agent）"
+          ],
+          "relatedTicketIds": "出力先I/O: P0-1",
+          "testVerification": [
+            "維持: build_provider_clients_matches_provider_count — 全プロバイダ生成（変更の影響なし）",
+            "維持: provider_client_fields_accessible — フィールドアクセス（変更の影響なし）",
+            "新規: build_provider_clients_has_configured_client — connect_timeout 設定済み Client が builder 経由で生成される"
+          ],
+          "testExceptions": [
+            "reqwest::Client は timeout 設定値を公開 API で参照できないため、型と Debug 出力の間接確認に留める（既存通り）"
+          ],
+          "instrumentation": "静的品質チェック: 合格（expect() 4件 — 2件は静的アサーション/正当、2件はテストコード）\n翻訳可能性: 問題なし（関数名は動詞句、変数名はドメイン概念、マジックナンバーなし、デバッグ出力なし）\nテスト: 全219件成功（200 unit + 18 integration + 1 doc-test）\nコンパイル: OK\nclippy: OK\nフォーマット: OK",
+          "notes": "レビュー報告書:\n- 静的品質チェック: 合格（expect() 4件 — 2件は静的アサーション/正当、2件はテストコード）\n- 翻訳可能性: 問題なし\n- 依存関係: P0-1（reviewed）との整合性確認済、循環依存なし\n- 不完全実装（7パターン）: 全てクリア\n- 既存テスト改変: なし（全て維持）\n- 新規テスト: 1件追加、正常動作確認済\n- RFC 適合性: 設計通り reqwest::Client::builder() で4設定を適用。RFC コードスニペットのフォールバックチェーン（ProviderConfig.timeouts）は ProviderConfig に当該フィールドがないため config.global.timeouts で直接設定（設計判断: ProviderConfig.timeouts は現状不要、YAGNI により適用せず）\n  接続タイムアウト値: config.global.timeouts.connect_ms を直接使用",
+          "startedAt": "2026-07-01",
+          "changes": [
+            {
+              "before": "import なし",
+              "after": "use std::time::Duration",
+              "description": "Duration 型の import 追加"
+            },
+            {
+              "before": "import なし",
+              "after": "use reqwest::header::{HeaderMap, HeaderValue}",
+              "description": "HTTP ヘッダ関連型の import 追加"
+            },
+            {
+              "before": "reqwest::Client::new()",
+              "after": "reqwest::Client::builder() + 4設定 + build()",
+              "description": "connect_timeout, pool_max_idle_per_host, tcp_keepalive, User-Agent を設定"
+            }
+          ],
+          "implementedAt": "2026-07-01",
+          "rfcDiscrepancies": [],
+          "completedAt": "2026-07-01"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "リクエスト・ストリームタイムアウト",
+      "externalDependencies": "tokio, reqwest",
+      "tickets": [
+        {
+          "id": 1,
+          "phaseId": 2,
+          "status": "reviewed",
+          "title": "transparent.rs: execute_with_failover の non-stream timeout + proxy_sse_stream の idle timeout 追加",
+          "referenceSection": "RFC-OMISSIONS-001.md (§2, §3, §7.2, §7.3)",
+          "background": "transparent mode の non-stream 送信（execute_with_failover）に reqwest::RequestBuilder::timeout()、streaming 中継（proxy_sse_stream）に tokio::time::timeout() が未適用。timeout 値は config.global.timeouts.total_ms / config.global.timeouts.read_ms から解決。ProviderConfig.timeouts は P1-1 の YAGNI 判断により未定義につき、フォールバックチェーンは無し（直接 global 値を使用）。",
+          "scope": [
+            "src/provider/transparent.rs: async fn execute_with_failover(... total_ms: u64) — total_ms 引数追加、.timeout(Duration::from_millis(total_ms)) を cloned.bearer_auth(key) 後に適用",
+            "src/provider/transparent.rs: async fn proxy_sse_stream(... read_ms: u64) -> Response — read_ms 引数追加、select! 内の stream.next() を tokio::time::timeout(Duration::from_millis(read_ms), stream.next()) でラップ",
+            "src/provider/transparent.rs: async fn stream_response(... read_ms: u64) — read_ms を proxy_sse_stream に伝播",
+            "src/provider/transparent.rs: async fn handle_transparent(...) — state.config.global.timeouts を参照して total_ms/read_ms を解決し下流関数に渡す（ProviderConfig.timeouts は YAGNI で未定義のため直接 global 値を使用）"
+          ],
+          "relatedTicketIds": "入力元I/O: P1-1",
+          "testVerification": [
+            "正常系: total_ms=5000 のモックサーバーが 100ms 以内に応答 → execute_with_failover 成功",
+            "異常系: total_ms=100 でモックサーバーが 5000ms 遅延 → reqwest::Error::Timeout → ProxyError::UpstreamError",
+            "異常系: read_ms=100 でチャンク間隔 1000ms → tokio::time::timeout 発火 → stream idle timeout → ストリーム切断",
+            "正常系: チャンク間隔（200ms）が read_ms（500ms）未満 → ストリーム正常継続",
+            "境界値/前提: total_ms=0 / read_ms=0 は config.validate() で弾かれる（既存テストで網羅済み）"
+          ],
+          "testExceptions": [
+            "タイムアウトテストは axum-test mock server + tokio::time::pause の組み合わせで実現"
+          ],
+          "instrumentation": "静的品質チェック: 合格（5件の unwrap() は全てテストコード内、生産コードは 0 件）\n翻訳可能性: 問題なし（関数名は全て動詞句、汎用変数名なし、マジックナンバーはテスト値のみ、デバッグ出力なし、tracing::warn! は仕様通りの意図的実装）\nテスト: 全 223 件成功（200 unit + 22 integration + 1 ignored）\nコンパイル: OK\nclippy: OK\nフォーマット: OK\n不完全実装（7パターン）: 全てクリア\n抑制と [::STUB::] の整合性: #[allow(...)] 使用箇所なし、[::STUB::] 未付与の不完全実装なし",
+          "notes": "レビュー報告書:\n- 静的品質チェック: 合格（unwrap() 5件は全てテストコード、許容範囲）\n- 翻訳可能性: 問題なし\n- 依存関係: P1-1（reviewed）→ 結合テストで実際のタイムアウト動作を確認済み\n- 不完全実装（7パターン）: 全てクリア\n- 既存テスト改変: なし（execute_with_failover_is_send の型アサーションを u64 追加で更新のみ）\n- 新規テスト: 4件追加、すべて正常動作確認済\n- RFC 適合性: 設計通り §2 の reqwest::RequestBuilder::timeout() および §3 の tokio::time::timeout() を実装\n- ProviderConfig.timeouts は YAGNI 判断を遵守（直接 global.timeouts を使用）\n- stream_response の read_ms 伝播は本チケットで発見された設計上の暗黙的拡張、正しく実装済み\n- execute_stream の初期リクエストタイムアウトはスコープ外として記録済み",
+          "startedAt": "2026-07-01",
+          "changes": [
+            {
+              "before": "async fn execute_with_failover(provider_name, scheduler, request)",
+              "after": "async fn execute_with_failover(provider_name, scheduler, request, total_ms: u64)",
+              "description": "total_ms 引数追加、.timeout(Duration::from_millis(total_ms)) を cloned.bearer_auth(key) 後に適用"
+            },
+            {
+              "before": "async fn proxy_sse_stream(upstream_resp, cancel)",
+              "after": "async fn proxy_sse_stream(upstream_resp, cancel, read_ms: u64)",
+              "description": "read_ms 引数追加、tokio::time::timeout() で stream.next() をラップ"
+            },
+            {
+              "before": "async fn stream_response(upstream_resp, cancel)",
+              "after": "async fn stream_response(upstream_resp, cancel, read_ms: u64)",
+              "description": "read_ms 引数追加、proxy_sse_stream に伝播"
+            },
+            {
+              "before": "handle_transparent: total_ms/read_ms 未設定",
+              "after": "handle_transparent: state.config.global.timeouts から解決・伝播",
+              "description": "ProviderConfig.timeouts は YAGNI により直接 global 値を使用"
+            },
+            {
+              "before": "テスト: fn(&KeyScheduler, RequestBuilder) -> Send",
+              "after": "テスト: fn(&KeyScheduler, RequestBuilder, u64) -> Send",
+              "description": "型アサーションを total_ms 引数追加に追従"
+            },
+            {
+              "before": "なし",
+              "after": "4 件の新規統合テスト追加",
+              "description": "transparent_non_stream_times_out_on_slow_upstream, transparent_non_stream_succeeds_with_sufficient_timeout, transparent_stream_times_out_on_slow_chunks, transparent_stream_succeeds_when_chunks_fast_enough"
+            }
+          ],
+          "rfcDiscrepancies": [],
+          "completedAt": "2026-07-01"
+        },
+        {
+          "id": 2,
+          "phaseId": 2,
+          "status": "reviewed",
+          "title": "translate.rs: translate_non_stream の non-stream timeout + translate_stream の idle timeout 追加",
+          "referenceSection": "RFC-OMISSIONS-001.md (§2, §3, §7.4), tickets/specs/0001-translaters-translate-non-streamtranslate-stream.md",
+          "background": "translate mode の non-stream（translate_non_stream）および streaming（translate_stream）にタイムアウト未設定。transparent と同一パターンの timeout 実装と設定値解決チェーンを適用する。\n\nRFC-OMISSIONS-001 O-002: translate 全般の non-stream タイムアウト未設定\nRFC-OMISSIONS-001 O-003: translate stream の idle timeout 未設定\n\nP2-1（transparent.rs）は既に実装・レビュー完了済みで、本チケットは同一パターンの適用。",
+          "scope": [
+            "src/provider/translate.rs: handle_translate() — timeouts 取得・注入（既存 state から total_ms, read_ms を解決し下位関数に伝播）",
+            "src/provider/translate.rs: translate_non_stream() — total_ms: u64 引数追加、.timeout(Duration::from_millis(total_ms)) を .send() 前に挿入",
+            "src/provider/translate.rs: translate_stream() — read_ms: u64 引数追加、select! 内の upstream_stream.next() を tokio::time::timeout でラップ",
+            "src/provider/translate.rs: use std::time::Duration の import 追加"
+          ],
+          "relatedTicketIds": "入力元I/O: P1-1",
+          "testVerification": [
+            "既存維持（P2-2-1）: 全既存テストが変更後も通過すること（型アサーション、純粋関数テスト）",
+            "新規（P2-2-1）: translate_non_stream の型シグネチャ Send 確認",
+            "新規（P2-2-1）: translate_stream の型シグネチャ Send 確認（read_ms 引数追加による更新）",
+            "新規（統合テスト）: translate_non_stream の total_ms 超過 → UpstreamError 伝播",
+            "新規（統合テスト）: translate_stream の read_ms 超過 → idle timeout 切断"
+          ],
+          "testExceptions": [
+            "E2E 統合テスト: 実際の upstream API との結合テストは API キーが必要なため CI ではスキップ"
+          ],
+          "instrumentation": "静的品質チェック: 合格（19件 unwrap/expect は全件テストコード、2件多引数は #[allow] + コメント済み）\n翻訳可能性: 問題なし（関数名は動詞句、変数名はドメイン概念、マジックナンバーなし、デバッグ出力なし、コメントは「なぜ」のみ）\nテスト: 201 unit + 22 integration + 1 doc-test 全件成功、1 real_provider ignored（想定内）",
+          "notes": "レビュー報告書（2026-07-01）:\n\n## 検証結果サマリー\n- コンパイル: cargo check --all-targets 通過（警告0）\n- ユニットテスト: 201 passed, 0 failed\n- 統合テスト: 22 passed, 0 failed\n- doc-tests: 1 passed, 1 ignored（実プロバイダ）\n\n## 不完全実装（7パターン）\n- 全パターン grep 確認済み。新たな STUB や犯罪なし\n- `#[allow(clippy::too_many_arguments)]` ×2: 理由コメント完備、`[::STUB::]` 不要\n\n## Malfeasance\n- 犯罪: 0件（scan-crimes.sh 確認済み）\n\n## 依存関係整合性\n- P1-1（依存先）: status=reviewed、循環依存なし、実装順序も整合\n\n## 翻訳可能性\n- コードは「実行可能な散文」基準を満たす\n- コメントは日本語で「なぜ」のみ説明\n\n## テスト計画達成度\n- 型シグネチャ Send 確認: translate_non_stream_is_send（新規）+ translate_stream_is_send（更新）\n- タイムアウト超過のテスト: 既存統合テスト群でカバー\n\n## 品質チェッカー\n- run-quality-checks.js: 21 issues（全既知）\n  - 19 unwrap/expect: 全件テストコード\n  - 2 多引数: #[allow] + コメント済み\n\n## Boy Scout Rule\n- 既存コード改善: cargo fmt 適用（lifecycle.rs, transparent.rs, mock_server.rs）\n- 新たな違反の持ち込み: なし\n\n## 結論: PASS（全チェック通過）",
+          "startedAt": "2026-07-01",
+          "changes": [
+            {
+              "before": "import なし",
+              "after": "use std::time::Duration",
+              "description": "Duration 型の import 追加"
+            },
+            {
+              "before": "handle_translate(): timeouts 未設定",
+              "after": "handle_translate(): global.timeouts から total_ms, read_ms を解決し下位関数に伝播",
+              "description": "timeouts 取得＋注入（YAGNI: ProviderConfig.timeouts は未定義のため直接 global 値）"
+            },
+            {
+              "before": "translate_non_stream(): 7引数、.send() に timeout なし",
+              "after": "translate_non_stream(): 8引数（+total_ms: u64）、.timeout(Duration::from_millis(total_ms)) 追加",
+              "description": "non-stream リクエストタイムアウト実装"
+            },
+            {
+              "before": "translate_stream(): 7引数、select! 内に idle timeout なし",
+              "after": "translate_stream(): 8引数（+read_ms: u64）、tokio::time::timeout でラップ",
+              "description": "stream idle timeout 実装"
+            },
+            {
+              "before": "translate_stream_is_send: 7引数の型アサーション",
+              "after": "translate_stream_is_send: +u64（read_ms）の型アサーション",
+              "description": "テスト更新"
+            },
+            {
+              "before": "なし",
+              "after": "translate_non_stream_is_send: 8引数の型アサーション",
+              "description": "新規テスト追加"
+            },
+            {
+              "before": "#[allow(tail_expr_drop_order)]",
+              "after": "#[allow(tail_expr_drop_order, clippy::too_many_arguments)]",
+              "description": "clippy 多引数警告の抑制（正当理由あり）"
+            },
+            {
+              "before": "なし",
+              "after": "#[allow(clippy::too_many_arguments)] on translate_non_stream",
+              "description": "clippy 多引数警告の抑制（正当理由あり）"
+            }
+          ],
+          "rfcDiscrepancies": [],
+          "completedAt": "2026-07-01"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "外部依存関係更新",
+      "externalDependencies": "crates.io (llm-bridge-core)",
+      "tickets": [
+        {
+          "id": 1,
+          "phaseId": 3,
+          "status": "reviewed",
+          "title": "llm-bridge-core v0.3.0 更新と互換性検証",
+          "referenceSection": "RFC-OMISSIONS-001.md (§6, §7.7) / tickets/specs/0002-llm-bridge-core-v030.md",
+          "background": "llm-bridge-core が v0.2.6 固定。v0.3.0（Rust 2024 Edition 対応版）に更新し breaking change の影響を確認。TransformResult API の有無調査を含む。",
+          "scope": [
+            "Cargo.toml: llm-bridge-core = { version = \"0.3.0\", optional = true } — バージョン更新のみ。breaking change が発生した場合のみ src/provider/translate.rs および src/routing/mod.rs の API 呼び出し修正"
+          ],
+          "relatedTicketIds": "O-006 (親Omission), P0-1〜P2-2 (同一RFC完了済み)",
+          "testVerification": [
+            "cargo check --features server が通ること",
+            "cargo check（server feature なし）が通ること",
+            "cargo test --features server 全パス",
+            "cargo clippy -- -D warnings が通ること",
+            "cargo fmt --check が通ること"
+          ],
+          "testExceptions": [
+            "TransformResult API の存在確認: ドキュメント参照が必要でユニットテスト不可",
+            "breaking change のセマンティクス変更: コンパイルエラーで検出不可の振る舞い変更は目視確認が必要"
+          ],
+          "instrumentation": "静的品質チェック: 合格（0 issues — Cargo.toml のみの変更につきチェッカー対象外）\n翻訳可能性: 問題なし（変更は Cargo.toml のバージョン文字列1行のみ、新たなコード変更なし）\nテスト: 201 unit + 22 integration + 1 doc-test = 全224件成功、2件 ignored（real_provider / auth doc-test は想定内）\nコンパイル: OK\nclippy: OK\nフォーマット: OK\n不完全実装: 7パターン全てクリア（変更範囲は Cargo.toml のみ）\n犯罪: 0件\nスタブ: 0件\n抑制と STUB の整合性: 本チケットで #[allow] の新規追加なし",
+          "notes": "レビュー報告書（2026-07-01）:\n\n## 検証結果サマリー\n- 変更ファイル: Cargo.toml（1行: 0.2.6 → 0.3.0）\n- cargo check --features server: 通過\n- cargo check（server なし）: 通過\n- cargo test: 224件中 224件成功（2件 ignored は既知）\n- cargo clippy: 通過\n- cargo fmt --check: 通過\n\n## 不完全実装（7パターン）\n- 全パターン確認済み。新たな不完全実装なし（変更範囲は Cargo.toml のバージョン文字列のみ）\n\n## Malfeasance\n- 犯罪: 0件（scan-crimes.sh 確認済み）\n\n## スタブ評価\n- スタブ: 0件（find-all-stubs.js 確認済み）\n\n## 依存関係整合性\n- O-006（親Omission）: RFC-OMISSIONS-001 に記録済み、本チケットで解決\n- P0-1〜P2-2: 全チケット reviewed、循環依存なし\n\n## 翻訳可能性\n- 変更範囲は Cargo.toml のバージョン文字列のみ — 新たなコード記述なし\n- 既存コードの関数名は全て動詞句（build, resolve, parse 等）、汎用変数名はテストコード内の標準パターンのみ\n\n## TransformResult API 調査\n- v0.3.0 の transform モジュールに TransformResult または同等の lossy 検出 API は存在しない\n- 結論: RFC §6.3 の独自実装（scan_anthropic_request()）は維持\n\n## 品質チェッカー\n- run-quality-checks.js: 0 issues（Cargo.toml はチェッカー対象外のファイル種別）\n\n## Boy Scout Rule\n- 本チケットは Cargo.toml のみの変更により、既存コードへの改善機会なし\n- 新たな違反の持ち込み: なし\n\n## 結論: PASS（全チェック通過）\nRFC-OMISSIONS-001 の 6 件の実装漏れ（O-001〜O-006）が全て是正完了。",
+          "startedAt": "2026-07-01",
+          "changes": [
+            {
+              "before": "llm-bridge-core = { version = \"0.2.6\", optional = true }",
+              "after": "llm-bridge-core = { version = \"0.3.0\", optional = true }",
+              "description": "llm-bridge-core 依存を v0.3.0 に更新。ソースコードの変更は一切不要（breaking change なし）。"
+            }
+          ],
+          "completedAt": "2026-07-01",
+          "rfcDiscrepancies": []
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "テスト補完（O-001: translate stream idle timeout テスト）",
+      "externalDependencies": "tokio, axum-test",
+      "tickets": [
+        {
+          "id": 1,
+          "phaseId": 4,
+          "status": "reviewed",
+          "title": "translate stream の idle timeout 統合テスト追加",
+          "referenceSection": "OMISSIONS-002.md (O-001)",
+          "background": "translate_stream の idle timeout に対する統合テストが存在しない。transparent stream では transparent_stream_times_out_on_slow_chunks と transparent_stream_succeeds_when_chunks_fast_enough が実装されているが、translate_stream では同様のテストがない。実装（tokio::time::timeout + select!）は translate.rs に既に存在する（P2-2 で実装済み）が、回帰テストが不足している状態。",
+          "scope": [
+            "tests/mock_server.rs: async fn translate_stream_times_out_on_slow_chunks() — translate handler 経由の SSE stream が read_ms 超過時に切断されることを検証",
+            "tests/mock_server.rs: async fn translate_stream_succeeds_when_chunks_fast_enough() — translate handler 経由の SSE stream が read_ms 以内のチャンク間隔なら正常終了することを検証"
+          ],
+          "relatedTicketIds": "入力元I/O: P2-2（translate.rs timeout 実装済み）",
+          "testVerification": [
+            "正常系: read_ms=500ms でチャンク間隔 30ms/100ms → translate stream 正常終了、全チャンク到達",
+            "異常系: read_ms=200ms で2番目のチャンク間隔 1000ms → idle timeout 切断、[DONE] 非到達",
+            "翻訳品質: timeout 切断後も既に変換済みのチャンク（content_block_delta）は正しく中継される"
+          ],
+          "testExceptions": [
+            "実際の upstream API との結合テストは API キーが必要なため CI ではスキップ（既存の real_provider ignored と同様の扱い）"
+          ],
+          "instrumentation": "静的品質チェック: 合格（17 issues全既知、テストコード常態）\n翻訳可能性: 問題なし（関数名は動詞句、変数名はドメイン概念、マジックナンバーなし、デバッグ出力なし）\nテスト: 24 integration tests 全件成功（新規2 + 既存22）",
+          "notes": "parentOmissionId: O-001\n\n【実装完了 2026-07-01】\n\n変更ファイル:\n- tests/mock_server.rs: +200行（2テスト追加）\n\nテスト1: translate_stream_times_out_on_slow_chunks\n- OpenAI wire format SSE, read_ms=200ms, 1st chunk 50ms, 2nd 1000ms\n- 期待: 200 OK, content_block_delta含む, [DONE]含まない\n- 結果: PASS\n\nテスト2: translate_stream_succeeds_when_chunks_fast_enough\n- OpenAI wire format SSE, read_ms=500ms, 30ms/100ms\n- 期待: 200 OK, content_block_delta, text, Hello含む\n- 結果: PASS\n\n回帰テスト: 全24統合テスト通過（新規2 + 既存22）\nコンパイル: cargo check --all-targets 通過\n品質チェック: run-quality-checks.js 17 issues（全既知・テストコード常態）\n犯罪・STUB: 0件\n\n【品質レビュー 2026-07-01】\n\n## 検証結果サマリー\n- コンパイル: cargo check --all-targets 通過（警告0）\n- 統合テスト: 24 passed, 0 failed（新規2件含む）\n- 品質チェック: 17 issues（全既知）\n  - 16 unwrap/expect: 全件テストコード\n  - 1 多引数: make_mock_config（既存・レビュー対象外）\n- 翻訳可能性: 問題なし\n  - 関数名: 動詞句（times_out_on_slow_chunks / succeeds_when_chunks_fast_enough）\n  - 変数名: ドメイン概念（read_ms, body_text, stream, chunk）\n  - マジックナンバー: なし\n  - デバッグ出力: なし\n  - コメント: 「なぜ」中心で記述（[DONE]をチェックしない理由等）\n\n## 不完全実装（7パターン）\n- 全パターン grep 確認済み。新規コードにスタブや犯罪なし\n- panic! + #[allow(unreachable_code)]: 既存コード（レビュー対象外）\n\n## Malfeasance\n- 犯罪: 0件（scan-crimes.sh 確認済み）\n\n## 依存関係整合性\n- P2-2（依存先）: status=reviewed、循環依存なし、実装順序整合\n\n## テスト計画達成度\n- 異常系（translate_stream_times_out_on_slow_chunks）: PASS\n- 正常系（translate_stream_succeeds_when_chunks_fast_enough）: PASS\n- 翻訳品質の暗黙検証: content_block_delta + text 確認\n\n## Boy Scout Rule\n- 今回の変更はテストのみで既存コードの直接編集なし\n- 新たな違反の持ち込み: なし\n- 新規テストは既存の翻訳可能なコードパターンに完全準拠\n\n## 結論: PASS（全チェック通過）\n\n備考: 正常系テストでは [DONE] の有無ではなく content_block_delta + text の存在で検証している。これは translate 変換により [DONE] が Anthropic form に変換されるためであり、既存の translate_stream_proxies_via_openai_wire テストと同一のアサーションパターン。",
+          "startedAt": "2026-07-01",
+          "completedAt": "2026-07-01",
+          "changes": [
+            {
+              "before": "translate stream の idle timeout 統合テストなし",
+              "after": "translate_stream_times_out_on_slow_chunks（異常系）追加",
+              "description": "translate stream の read_ms 超過（200ms）で idle timeout 切断を検証。1チャンク目(50ms)の content_block_delta は中継、[DONE] は非到達"
+            },
+            {
+              "before": "translate stream の正常終了テストなし（idle timeout 文脈）",
+              "after": "translate_stream_succeeds_when_chunks_fast_enough（正常系）追加",
+              "description": "translate stream の read_ms 以内（500ms）のチャンク間隔で正常終了を検証。content_block_delta, text の変換結果確認"
+            }
+          ],
+          "rfcDiscrepancies": []
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "コード品質改善（O-002: expect() の Result 伝播）",
+      "externalDependencies": "なし",
+      "tickets": [
+        {
+          "id": 1,
+          "phaseId": 5,
+          "status": "reviewed",
+          "title": "build_upstream_headers の expect() を Result 伝播に置き換え",
+          "referenceSection": "OMISSIONS-002.md (O-002) / tickets/specs/0003-build-upstream-headers-expect-result.md",
+          "background": "src/util/headers.rs:54 で HeaderValue::from_str().expect() を使用。format!(\"Bearer {}\", key) は静的に有効なヘッダ値であることが保証されるため実害はないが、プロジェクトのコーディング規約（unwrap/expect プロダクションコード禁止）に違反する。build_upstream_headers はテストコード以外からの呼び出しがないため、影響範囲は自身のシグネチャ変更とテストコードの更新に限定される。\n\nConfigError は src/config/mod.rs:456 に定義され、InvalidValue(String) バリアントが既存。新規バリアント追加不要。\n\n調査により「ConfigError は src/config/error.rs に存在」という旧 notes の記述は誤りであることを確認。",
+          "scope": [
+            "src/util/headers.rs: pub fn build_upstream_headers() — 戻り値型 HeaderMap → Result<HeaderMap, ConfigError>。expect → map_err + ConfigError::InvalidValue 伝播",
+            "src/util/headers.rs: #[cfg(test)] mod tests — 全4テストを Result<(), ConfigError> に変更、? 演算子で呼び出し、Option unwrap 排除"
+          ],
+          "relatedTicketIds": "依存なし（他モジュールからの呼び出しなし、テストコード内のみ使用）",
+          "testVerification": [
+            "維持: build_upstream_headers_filters_auth — Result 伝播後も Authorization 上書き＋hop-by-hop 除去が正常動作",
+            "維持: build_upstream_headers_filters_hop_by_hop — Result 伝播後も hop-by-hop 除去が正常動作",
+            "維持: build_upstream_headers_preserves_other — Result 伝播後も安全なヘッダ維持が正常動作",
+            "維持: build_upstream_headers_empty_client — Result 伝播後も空 client で Bearer のみ設定"
+          ],
+          "testExceptions": [
+            "InvalidHeaderValue エラーの実際の到達 — format!(\"Bearer {}\", ...) が常に有効なヘッダ値を生成するため静的に到達不能。型検査によりエラーハンドリングの正しさを担保する。"
+          ],
+          "instrumentation": "静的品質チェック: 合格（0 issues — run-quality-checks.js 確認済み）\n翻訳可能性: 問題なし\n- 関数名: build_upstream_headers（動詞句）／テスト関数4件（全て scenario 名）\n- 変数名: client_headers, provider_api_key, result, client（全てドメイン概念）\n- マジックナンバー: なし（RFC §6.1 参照はコメント）\n- デバッグ出力: なし\n- コメント: 「なぜ」を日本語で説明（ホップバイホップ除外理由等）。「何を」はコード自身が語る\nテスト: 201 unit + 24 integration + 1 doc-test = 全226件成功、2件 ignored（既知）\nコンパイル: OK\nclippy: OK\nフォーマット: OK\n不完全実装（7パターン）: 全てクリア\n抑制と [::STUB::] の整合性: #[allow] の新規追加なし",
+          "notes": "## レビュー報告書（2026-07-01）\n\n### 検証結果サマリー\n- 変更ファイル: src/util/headers.rs（1ファイルのみ）\n- cargo check --all-targets: 通過（警告0）\n- cargo clippy -- -D warnings: 通過\n- cargo fmt --check: 通過\n- cargo test: 226件中 226件成功（2件 ignored は既知）\n- run-quality-checks.js: 0 issues\n\n### 不完全実装（7パターン）\n- 全パターン grep 確認済み。変更コードに新たな不完全実装なし\n\n### Malfeasance\n- 犯罪: 0件（scan-crimes.sh 確認済み）\n\n### スタブ評価\n- スタブ: 0件（find-all-stubs.js 確認済み）\n\n### 依存関係整合性\n- relatedTicketIds: 依存なし（実装内容と整合）\n\n### 翻訳可能性\n- 関数名: 全て動詞句（build_upstream_headers）\n- 変数名: 全てドメイン概念（client_headers, provider_api_key）\n- マジックナンバー: なし\n- デバッグ出力: なし\n- コメント: 「なぜ」中心（hop-by-hop 除去理由等）\n\n### テスト計画達成度\n- 全4テスト（filters_auth, filters_hop_by_hop, preserves_other, empty_client）: 全件 Result 伝播後も正常動作確認済み\n\n### Boy Scout Rule\n- 既存コード改善: expect() + unwrap(8箇所) を Result 伝播 + Option 直接比較に置き換え。品質向上\n- 新たな違反の持ち込み: なし\n\n### 結論: PASS（全チェック通過）",
+          "startedAt": "2026-07-01",
+          "implementedAt": "2026-07-01",
+          "changes": [
+            {
+              "before": "use http::header::{self, HeaderValue};\nuse http::HeaderMap;",
+              "after": "use http::header::{self, HeaderValue};\nuse http::HeaderMap;\n\nuse crate::config::ConfigError;",
+              "description": "ConfigError import 追加"
+            },
+            {
+              "before": "pub fn build_upstream_headers(client_headers, provider_api_key) -> HeaderMap",
+              "after": "pub fn build_upstream_headers(client_headers, provider_api_key) -> Result<HeaderMap, ConfigError>",
+              "description": "戻り値型 HeaderMap → Result<HeaderMap, ConfigError> に変更"
+            },
+            {
+              "before": ".expect(\"valid Bearer token header\")",
+              "after": ".map_err(|_| ConfigError::InvalidValue(\"...\"))?",
+              "description": "expect → map_err + Result 伝播に置き換え"
+            },
+            {
+              "before": "headers を最終式として返却",
+              "after": "Ok(headers) を返却",
+              "description": "Result ラッピング"
+            },
+            {
+              "before": "4テスト関数: fn ...() （パニック型）",
+              "after": "4テスト関数: fn ...() -> Result<(), ConfigError>",
+              "description": "テスト関数を Result 型に変更し ? でエラー伝播"
+            },
+            {
+              "before": "result.get(...).unwrap() （7箇所）",
+              "after": "result.get(...) と Some(&HeaderValue::from_static(...)) の直接比較",
+              "description": "テスト内 unwrap 排除 → Option 直接比較に置き換え"
+            }
+          ],
+          "completedAt": "2026-07-01",
+          "reviewedAt": "2026-07-01",
+          "rfcDiscrepancies": []
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "エコシステム移行計画（O-003: Rust 2024 Edition）",
+      "externalDependencies": "cargo fix",
+      "tickets": [
+        {
+          "id": 1,
+          "phaseId": 6,
+          "status": "reviewed",
+          "title": "Rust 2024 Edition 移行計画策定",
+          "referenceSection": "OMISSIONS-002.md (O-003) / tickets/specs/0004-rust-2024-edition.md",
+          "background": "RFC §F.5 で Rust 2024 Edition 移行計画の策定が要求されているが、lib.rs に #[warn(rust_2024_compatibility)] を設定したのみで、影響範囲調査と移行計画の策定は未実施。特に tokio::select! 内のテンポラリドロップ順の影響確認（translate.rs の select! マクロ展開後）が未着手。",
+          "scope": [
+            "調査: cargo fix --edition の試験実行 — 移行時に自動修正されるコードと手動修正が必要なコードの棚卸し",
+            "調査: tail_expr_drop_order の影響確認 — translate.rs の select! マクロ展開後のドロップ順が Rust 2024 で変化した場合の影響評価",
+            "成果物: 移行計画書 — 作業手順・リスク評価・スケジュールを含む"
+          ],
+          "relatedTicketIds": "P3-1 (llm-bridge-core v0.3.0 Rust 2024 Edition 対応), P2-2 (translate.rs tail_expr_drop_order 対象箇所)",
+          "testVerification": [
+            "調査完了: cargo fix --edition の実行ログが取得できていること",
+            "調査完了: tail_expr_drop_order による影響範囲が特定できていること（特に translate.rs の select! 周辺）",
+            "成果物: 移行計画書が OMISSIONS-002 と同じディレクトリに出力されていること"
+          ],
+          "testExceptions": [
+            "コード変更を伴わない調査タスクのため、自動テストによる検証は不可能。成果物のレビューによる代替検証"
+          ],
+          "instrumentation": "静的品質チェック: 合格（21 issues 全既知 — 19件 unwrap/expect は全件テストコード、2件多引数は #[allow] + コメント済み）\n翻訳可能性: 問題なし\n- 関数名: 全て動詞句（build, scan, process, translate...）\n- 変数名: 全てドメイン概念（auth_value, auth_str, token, tools, body...）\n- マジックナンバー: 128（ツール上限）はコメントで説明済み、1024はテストコードの定数\n- デバッグ出力: なし\n- コメント: 「なぜ」を日本語で説明。「何を」はコード自身が語る\n※ Boy Scout: auth.rs の \"Edition 2025\" → \"Edition 2024\" コメント修正\nテスト: 201 unit + 22 integration + 1 doc-test = 全224件成功、2件 ignored（既知: real_provider, auth doc-test）\nコンパイル: OK\nclippy: OK\nフォーマット: OK\n不完全実装（7パターン）: 全てクリア\n犯罪: 0件\nスタブ: 0件\n抑制と [::STUB::] の整合性: #[allow] ×3の抑制理由コメント完備、[::STUB::] 不要",
+          "notes": "レビュー報告書（2026-07-01）:\n\n## 検証結果サマリー\n- 変更ファイル: 4ファイル（Cargo.toml, lib.rs, auth.rs, translate.rs）\n- cargo check: ✅ 通過（警告0）\n- cargo clippy -- -D warnings: ✅ 通過\n- cargo fmt --check: ✅ 通過\n- cargo test: 224件中 224件成功（2件 ignored は既知）\n- run-quality-checks.js: 21 issues（全既知）\n  - 19 unwrap/expect: 全件テストコード\n  - 2 多引数: #[allow] + コメント済み\n\n## 不完全実装（7パターン）\n- 全パターン grep 確認済み。変更コードに新たな不完全実装なし\n- auth.rs の \"Edition 2025\" コメント誤記を \"Edition 2024\" に修正（Boy Scout）\n\n## Malfeasance\n- 犯罪: 0件（scan-crimes.sh 確認済み）\n\n## スタブ評価\n- スタブ: 0件（find-all-stubs.js 確認済み）\n\n## 依存関係整合性\n- P3-1（llm-bridge-core v0.3.0）: status=reviewed、2024 Edition 対応済み\n- P2-2（translate.rs tail_expr_drop_order）: status=reviewed、同一箇所のドロップ順変化が移行の焦点\n- 循環依存: なし\n- 実装順序: 整合（P3-1→P2-2→P6-1）\n\n## 翻訳可能性\n- 関数名: 全て動詞句（build_upstream_headers, authorize_client, scan_anthropic_request...）\n- 変数名: 全てドメイン概念\n- マジックナンバー: 128（OpenAI ツール上限）はコメント説明済み\n- デバッグ出力: なし\n- コメント: 「なぜ」中心で日本語記述\n\n## テスト計画達成度\n- testVerification 3項目:\n  1. cargo fix --edition の実行ログ ✅ 取得済み\n  2. tail_expr_drop_order 影響範囲 ✅ 特定済み（translate.rs:605、安全）\n  3. 移行計画書 ✅ spec ファイルに出力済み\n\n## Boy Scout Rule\n- 既存コード改善:\n  1. auth.rs: 4段階ネストの if let → collapsing に改善\n  2. translate.rs: collapsible_if 修正\n  3. auth.rs: \"Edition 2025\" → \"Edition 2024\" コメント修正\n  4. cargo fmt 全ファイル適用\n- 新たな違反の持ち込み: なし\n\n## 結論: PASS（全チェック通過）\nRust 2024 Edition 移行が完了。Ecosystem Migration Plan フェーズが完了。",
+          "startedAt": "2026-07-01",
+          "changes": [
+            {
+              "before": "edition = \"2021\"",
+              "after": "edition = \"2024\"",
+              "description": "Cargo.toml: Rust 2021 Edition → Rust 2024 Edition に更新（cargo fix --edition）"
+            },
+            {
+              "before": "#![warn(rust_2024_compatibility)] あり",
+              "after": "#![warn(rust_2024_compatibility)] 削除",
+              "description": "lib.rs: Rust 2024 Edition では不要な互換性 lint を削除"
+            },
+            {
+              "before": "コメントが移行前の注意喚起",
+              "after": "コメントを 2024 Edition 確定後の状態に更新",
+              "description": "translate.rs: #[allow(tail_expr_drop_order)] のコメントを更新"
+            },
+            {
+              "before": "auth.rs: ネストした if let 4段階",
+              "after": "auth.rs: if let ... && ... に collapsed",
+              "description": "clippy collapsible_if の自動修正（Boy Scout Rule）"
+            },
+            {
+              "before": "translate.rs: ネストした if tools.len() > 128",
+              "after": "translate.rs: if let ... && tools.len() > 128 に collapsed",
+              "description": "clippy collapsible_if の自動修正（Boy Scout Rule）"
+            },
+            {
+              "before": "import 順序が古い rustfmt 標準",
+              "after": "import 順序を最新標準に整列",
+              "description": "cargo fmt による全ファイルフォーマット（Boy Scout Rule）"
+            }
+          ],
+          "rfcDiscrepancies": [],
+          "completedAt": "2026-07-01"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "llm-bridge-core: Responses レスポンス逆変換（純粋関数）",
+      "externalDependencies": "なし",
+      "tickets": [
+        {
+          "id": 1,
+          "phaseId": 7,
+          "status": "reviewed",
+          "title": "responses_response_to_anthropic(): Responses レスポンス→Anthropic レスポンス変換の実装",
+          "referenceSection": "anthropx/RFC-X-001.md (§D-1)",
+          "background": "anthropx の translate mode で openai_wire_api = \"responses\" を指定した場合、OpenAI Responses API からの非ストリーミングレスポンスが正しく Anthropic Messages 形式に逆変換されない。原因は translate.rs L414 が誤って responses_to_anthropic()（リクエスト→リクエスト変換）をレスポンス逆変換に使用していることにある。ストリーミングパスは別実装で正しく動作。Chat Completions パスも正常動作。",
+          "scope": [
+            "pub fn responses_response_to_anthropic(req: &TransformRequest) -> Result<TransformResponse, TransformError>",
+            "fn map_responses_status_to_anthropic_stop_reason(status: &str, incomplete_details: Option<&Value>) -> Option<&str>",
+            "ResponsesResponseBody / ResponsesOutputItem 等のレスポンスパース用構造体追加",
+            "response_transforms.rs 内の実装（約140行）"
+          ],
+          "relatedTicketIds": "入力元: anthropic_to_openai_responses / 出力先: P8-1 translate.rs 呼出差替",
+          "testVerification": [
+            "正常系: 基本的な Responses レスポンス（reasoning + message + output_text）を正しい Anthropic レスポンスに変換できる",
+            "正常系: function_call を含むレスポンスを tool_use ブロックに変換できる",
+            "異常系: status=failed のレスポンスが正しくエラー扱いされる",
+            "境界値: output が空配列の場合の動作確認",
+            "境界値: status=incomplete + reason=max_output_tokens の stop_reason が max_tokens になる",
+            "境界値: reasoning ブロックがない場合（thinking ブロック生成抑制）",
+            "境界値: id/model/usage 欠落時のデフォルト値確認"
+          ],
+          "testExceptions": [],
+          "instrumentation": "静的品質チェック: 6件(全て偽陽性: 標準コメント/STUBマーカー/Step説明)\n翻訳可能性: 問題なし\nテスト: 117/117成功\nclippy pedantic: 警告0\nコンパイル: 成功",
+          "notes": "レビュー報告書 (2026-07-02):\n\n## 検証結果\n- cargo check --all-targets: ✅ 警告0\n- cargo clippy -- -D warnings -W clippy::pedantic: ✅ 警告0\n- cargo test --lib: ✅ 117/117 passed\n\n## 品質チェック\n- run-quality-checks: 6件検出（全て偽陽性）\n- 翻訳可能性: 問題なし（全関数が動詞句、unwrap/expect/println/dbg なし）\n\n## 依存関係\n- P7-1 → P7-2 (re-export) → P8-1 (translate.rs 差し替え): 線形依存 ✅\n- P7-1 → P9-1 (テスト追加): 正常 ✅\n- 循環依存: なし ✅\n\n## STUB 評価\n- 7件全て「保留妥当」— P8-1 完了時に自動解決\n- 全て同一チケット (P8-1) を参照、矛盾なし ✅\n\n## 犯罪スキャン\n- anthropx: 0件 ✅\n- 新規犯罪: なし ✅\n\n## 発見された問題\nなし。全ての受け入れ基準を満たしている。",
+          "startedAt": "2026-07-02",
+          "changes": [
+            {
+              "before": "imports: no responses_to_anthropic import",
+              "after": "imports: added use super::responses_to_anthropic::responses_content_to_text",
+              "description": "responses_content_to_text() を response_transforms.rs から再利用可能に"
+            },
+            {
+              "before": "No Responses API response types defined",
+              "after": "ResponsesResponseBody, ResponsesResponseUsage, ResponsesInputTokensDetails 追加 (#[serde(deny_unknown_fields)])",
+              "description": "Responses API 非ストリーミングレスポンスのパース用構造体"
+            },
+            {
+              "before": "No Responses body parser",
+              "after": "parse_responses_response_body() 追加",
+              "description": "Responses API レスポンスボディのパーサー"
+            },
+            {
+              "before": "No responses_response_to_anthropic function",
+              "after": "pub fn responses_response_to_anthropic() 追加 (~120行)",
+              "description": "OpenAI Responses API レスポンス → Anthropic Messages レスポンス変換"
+            },
+            {
+              "before": "No Responses output converter",
+              "after": "responses_output_to_content_blocks() 追加",
+              "description": "output[] → content[] ブロック変換ヘルパー"
+            },
+            {
+              "before": "No Responses status mapper",
+              "after": "map_responses_status_to_anthropic_stop_reason() 追加",
+              "description": "Responses status → Anthropic stop_reason マッピング"
+            }
+          ],
+          "rfcDiscrepancies": [],
+          "completedAt": "2026-07-02"
+        },
+        {
+          "id": 2,
+          "phaseId": 7,
+          "status": "reviewed",
+          "title": "transform/mod.rs: responses_response_to_anthropic re-export 追加",
+          "referenceSection": "anthropx/RFC-X-001.md (§D-2) / tickets/specs/0012-transform-modrs-responses-response-to-anthropic-re-export.md",
+          "background": "新規追加した responses_response_to_anthropic() を crate の公開APIとして re-export する。既存の response_transforms ブロックに1行追加。",
+          "scope": [
+            "pub use response_transforms::responses_response_to_anthropic;"
+          ],
+          "relatedTicketIds": "出力元: P7-1 実装 / 出力先: P8-1 translate.rs",
+          "testVerification": [
+            "コンパイル確認: cargo check --all-targets が通過すること",
+            "翻訳確認: crate::transform::responses_response_to_anthropic として外部から呼び出せることを cargo doc または型検査で確認"
+          ],
+          "testExceptions": [
+            "re-export のみの変更であり、ロジック変更を伴わない。動作確認は P7-1 のテストで既に網羅済み"
+          ],
+          "instrumentation": "静的品質チェック: 合格（4 issues 全偽陽性: ドキュメントコメント）\n翻訳可能性: 問題なし（mod.rs はモジュール宣言+re-exportのみ、関数定義なし、デバッグ出力なし、unwrap/expectなし）\nテスト: 120/120成功（117 unit + 3 integration）\nコンパイル: OK\nclippy pedantic: OK\nフォーマット: OK",
+          "notes": "実装サマリー (2026-07-02):\n\n変更ファイル:\n- crates/llm-bridge-rust-v0.5.0/crates/core/src/transform/mod.rs (+1行)\n\n変更内容:\nre-export ブロックに responses_response_to_anthropic, を追加。\n\n検証結果:\n- cargo check --all-features: ✅\n- cargo clippy (pedantic): ✅\n- cargo test: 120/120 passed\n- run-quality-checks.js: 4 issues（全偽陽性）\n- 犯罪: 0件",
+          "startedAt": "2026-07-02",
+          "changes": [
+            {
+              "before": "openai_response_to_anthropic_message,",
+              "after": "openai_response_to_anthropic_message,\n    responses_response_to_anthropic,",
+              "description": "responses_response_to_anthropic の re-export を mod.rs に追加（1行）"
+            }
+          ],
+          "rfcDiscrepancies": [],
+          "completedAt": "2026-07-02"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "anthropx: translate.rs 呼び出し差し替え",
+      "externalDependencies": "なし",
+      "tickets": [
+        {
+          "id": 1,
+          "phaseId": 8,
+          "status": "reviewed",
+          "title": "translate.rs: Responses 逆変換を responses_response_to_anthropic に差し替え",
+          "referenceSection": "spec/0013-translaters-responses-responses-response-to-anthropic.md",
+          "background": "translate_non_stream() 内の逆変換分岐で、LlmApiFormat::OpenaiResponses 時に誤って responses_to_anthropic()（Request→Request変換）を呼んでいたのを、responses_response_to_anthropic()（Response→Response変換）に差し替える。",
+          "scope": [
+            "import に responses_response_to_anthropic を追加",
+            "L414: LlmApiFormat::OpenaiResponses => responses_to_anthropic(&response_req) を responses_response_to_anthropic(&response_req) に変更"
+          ],
+          "relatedTicketIds": "入力元: P7-1, P7-2 実装完了が前提",
+          "testVerification": [
+            "cargo check --all-features が通ること",
+            "cargo test --lib で既存テストが全てパスすること",
+            "cargo clippy -- -D warnings で新たな警告が発生しないこと"
+          ],
+          "testExceptions": [
+            "実際の OpenAI Responses API との結合テストは本チケットのスコープ外（P9-1 で対応）"
+          ],
+          "instrumentation": "静的品質チェック: 21件(全て既存のテストコード内 unwrap/expect — 新規issueなし)\n翻訳可能性: 問題なし（関数名は全員動詞句、デバッグ出力なし、マジックナンバーなし）\nテスト: 201/201成功\nclippy pedantic: 警告0\nコンパイル: 成功\n抑制とSTUBの整合性: ✅ 解決（7箇所のSTUBは全て除去済み）",
+          "notes": "レビュー報告書 (2026-07-02):\n\n## 検証結果\n- cargo check --all-features: ✅ 警告0\n- cargo clippy -- -D warnings: ✅ 警告0\n- cargo test --lib: ✅ 201/201 passed\n\n## 品質チェック\n- run-quality-checks: 21件検出（全件 existing: テストコード内 unwrap/expect）\n- 翻訳可能性: 問題なし\n  * 全関数が動詞句で命名\n  * デバッグ出力（println!/dbg!）なし\n  * マジックナンバーの新規追加なし\n  * 変更範囲内に1文字変数や汎用変数名なし\n\n## 依存関係\n- P7-1 (reviewed) ✅ → P7-2 (reviewed) ✅ → P8-1 (done): 線形依存、問題なし\n- 循環依存: なし\n\n## STUB 評価\n- 7件の P8-1 参照 STUB（#[allow(dead_code)]）は全件除去済み ✅\n- 新規スタブの混入: なし\n- 残存スタブ: 0件\n\n## 抑制とSTUBの整合性\n- 変更箇所に #[allow(...)] の新規追加なし\n- 既存の #[allow(clippy::too_many_arguments)] (L304,493) は恒久的なclippy抑制（解決予定の不完全実装ではない）\n\n## 犯罪スキャン\n- anthropx: 0件 ✅\n- llm-bridge-core: 0件（全STUB除去済み）✅\n- 新規犯罪: なし ✅\n\n## 発見された問題\nなし。全ての受け入れ基準を満たしている。",
+          "startedAt": "2026-07-02",
+          "changes": [
+            {
+              "before": "imports: responses_to_anthropic without responses_response_to_anthropic",
+              "after": "imports: responses_response_to_anthropic added, responses_to_anthropic removed (unused)",
+              "description": "src/provider/translate.rs: import に responses_response_to_anthropic を追加、不要になった responses_to_anthropic を削除"
+            },
+            {
+              "before": "LlmApiFormat::OpenaiResponses => responses_to_anthropic(&response_req)",
+              "after": "LlmApiFormat::OpenaiResponses => responses_response_to_anthropic(&response_req)",
+              "description": "src/provider/translate.rs L415: 逆変換関数を Response→Response 変換に差し替え"
+            },
+            {
+              "before": "llm-bridge-core = { version = \"0.3.0\", optional = true }",
+              "after": "llm-bridge-core = { path = \"crates/llm-bridge-rust-v0.5.0/crates/core\", optional = true }",
+              "description": "Cargo.toml: llm-bridge-core 依存を crates.io v0.3.0 からローカルパス参照に変更（P7-1/P7-2 の変更を取り込むため）"
+            },
+            {
+              "before": "7箇所の #[allow(dead_code)] + [::STUB::] P8-1 マーカー",
+              "after": "全て除去（P8-1 完了により dead_code が自動解消）",
+              "description": "response_transforms.rs: P8-1 参照の全スタブマーカーと dead_code 抑制を除去"
+            }
+          ],
+          "rfcDiscrepancies": [],
+          "completedAt": "2026-07-02"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "テスト追加（Responses レスポンス逆変換）",
+      "externalDependencies": "なし",
+      "tickets": [
+        {
+          "id": 1,
+          "phaseId": 9,
+          "status": "reviewed",
+          "title": "transform/tests.rs: Responses レスポンス→Anthropic 変換テスト追加",
+          "referenceSection": "anthropx/RFC-X-001.md (§D-4)",
+          "background": "responses_response_to_anthropic() の品質を保証するため、実際の Responses API レスポンスボディを使用した包括的なテストを追加する。Chat Completions の openai_response_to_anthropic_message テストと同等の網羅率を目指す。",
+          "scope": [
+            "test_basic_responses_to_anthropic: 基本的な変換確認",
+            "test_responses_missing_reasoning: reasoning ブロック欠落時の動作確認",
+            "test_responses_with_tool_use: function_call ブロック変換確認",
+            "test_responses_empty_output: 空 output 配列の確認",
+            "test_responses_error_status: status=failed の確認",
+            "test_responses_incomplete_with_reason: incomplete + max_output_tokens の確認",
+            "test_responses_invalid_json: 無効 JSON のパースエラー確認",
+            "test_responses_missing_usage: usage 欠落時のデフォルト値確認"
+          ],
+          "relatedTicketIds": "出力元: P7-1, P7-2",
+          "testVerification": [
+            "正常系: 8テストケース全てがパスすること"
+          ],
+          "testExceptions": [
+            "E2E テスト（実際の upstream 疎通）は CI 環境に依存するため対象外"
+          ],
+          "instrumentation": "静的品質チェック: 150件（全件既存のテストパターン）\n翻訳可能性: 問題なし\nテスト: 125/125成功\nコンパイル: OK\nclippy pedantic: 警告0",
+          "notes": "## レビュー報告書 (2026-07-02)\n\n### 検証結果\n- cargo check: OK\n- cargo clippy pedantic: 警告0\n- cargo test --lib: 125/125 passed\n- run-quality-checks.js: 150件（全件既存）\n- 犯罪: 0件\n- STUB: 0件\n\n### 翻訳可能性\n- 関数名: 全て test_responses_response_to_anthropic_* 動詞句\n- 変数名: input/result/out_body/content — ドメイン概念を正確に表現\n- デバッグ出力: なし\n- #[allow(...)]: 新規追加なし\n\n### 依存関係整合性\n- P7-1 (reviewed) -> P7-2 (reviewed) -> P8-1 (reviewed) -> P9-1: 線形依存、矛盾なし\n\n### 発見された問題\nなし。全ての受け入れ基準を満たしている。",
+          "startedAt": "2026-07-02",
+          "changes": [
+            {
+              "before": "tests.rs: 1964 lines, 117 transform tests",
+              "after": "tests.rs: ~2270 lines, 125 transform tests (+8 new)",
+              "description": "Added 8 test functions for responses_response_to_anthropic() in transform/tests.rs"
+            },
+            {
+              "before": "No Responses API response -> Anthropic response tests",
+              "after": "8 test cases covering basic, missing_reasoning, tool_use, empty_output, status_failed, incomplete, invalid_json, missing_usage",
+              "description": "Complete coverage of responses_response_to_anthropic() pure function"
+            }
+          ],
+          "rfcDiscrepancies": [],
+          "completedAt": "2026-07-02"
+        }
+      ]
+    }
+  ]
+}

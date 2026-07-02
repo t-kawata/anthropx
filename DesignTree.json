@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "updatedAt": "2026-07-01T07:59:54.601Z",
+  "nodes": [
+    {
+      "id": "N1",
+      "title": "HTTP クライアント接続設定の追加（build_provider_clients）— timeout / pool / keepalive / User-Agent",
+      "status": "resolved",
+      "questions": [
+        {
+          "resolvedAt": "2026-07-01T07:59:54.601Z",
+          "answer": "Q1→B: 標準構成（connect_timeout + pool_max_idle_per_host(usize::MAX) + tcp_keepalive(30s) + User-Agent）を採用。Q2→A: ストリーミング idle timeout 時は即座に切断（標準APIと同一体感）。Q3→A: OnceLock<()> をモジュールレベルの static に設置。Q4→B: handle_messages の return 直前で record_request() を集約呼び出し。Q5→A: 今すぐ llm-bridge-core v0.3.0 に更新し breaking change 対応 + TransformResult 確認。"
+        }
+      ],
+      "children": []
+    },
+    {
+      "id": "N2",
+      "title": "リクエストレベル・ストリーミングタイムアウトの実装 — non-stream .timeout() と streaming idle timeout",
+      "status": "resolved",
+      "questions": [
+        {
+          "resolvedAt": "2026-07-01T07:59:54.601Z",
+          "answer": "Q1→B: 標準構成（connect_timeout + pool_max_idle_per_host(usize::MAX) + tcp_keepalive(30s) + User-Agent）を採用。Q2→A: ストリーミング idle timeout 時は即座に切断（標準APIと同一体感）。Q3→A: OnceLock<()> をモジュールレベルの static に設置。Q4→B: handle_messages の return 直前で record_request() を集約呼び出し。Q5→A: 今すぐ llm-bridge-core v0.3.0 に更新し breaking change 対応 + TransformResult 確認。"
+        }
+      ],
+      "children": []
+    },
+    {
+      "id": "N3",
+      "title": "register_metrics() の冪等性ガード — OnceLock または Once で初回のみ実行",
+      "status": "resolved",
+      "questions": [
+        {
+          "resolvedAt": "2026-07-01T07:59:54.601Z",
+          "answer": "Q1→B: 標準構成（connect_timeout + pool_max_idle_per_host(usize::MAX) + tcp_keepalive(30s) + User-Agent）を採用。Q2→A: ストリーミング idle timeout 時は即座に切断（標準APIと同一体感）。Q3→A: OnceLock<()> をモジュールレベルの static に設置。Q4→B: handle_messages の return 直前で record_request() を集約呼び出し。Q5→A: 今すぐ llm-bridge-core v0.3.0 に更新し breaking change 対応 + TransformResult 確認。"
+        }
+      ],
+      "children": []
+    },
+    {
+      "id": "N4",
+      "title": "handle_messages 後処理で record_request() メトリクス記録の追加",
+      "status": "resolved",
+      "questions": [
+        {
+          "resolvedAt": "2026-07-01T07:59:54.601Z",
+          "answer": "Q1→B: 標準構成（connect_timeout + pool_max_idle_per_host(usize::MAX) + tcp_keepalive(30s) + User-Agent）を採用。Q2→A: ストリーミング idle timeout 時は即座に切断（標準APIと同一体感）。Q3→A: OnceLock<()> をモジュールレベルの static に設置。Q4→B: handle_messages の return 直前で record_request() を集約呼び出し。Q5→A: 今すぐ llm-bridge-core v0.3.0 に更新し breaking change 対応 + TransformResult 確認。"
+        }
+      ],
+      "children": []
+    },
+    {
+      "id": "N5",
+      "title": "llm-bridge-core v0.2.6 → v0.3.0 バージョン更新戦略 — breaking change 対応",
+      "status": "resolved",
+      "questions": [
+        {
+          "resolvedAt": "2026-07-01T07:59:54.601Z",
+          "answer": "Q1→B: 標準構成（connect_timeout + pool_max_idle_per_host(usize::MAX) + tcp_keepalive(30s) + User-Agent）を採用。Q2→A: ストリーミング idle timeout 時は即座に切断（標準APIと同一体感）。Q3→A: OnceLock<()> をモジュールレベルの static に設置。Q4→B: handle_messages の return 直前で record_request() を集約呼び出し。Q5→A: 今すぐ llm-bridge-core v0.3.0 に更新し breaking change 対応 + TransformResult 確認。"
+        }
+      ],
+      "children": []
+    }
+  ]
+}
